@@ -1,2 +1,2 @@
-To be: a client to poke things into the archive via the internet archive S3 connector.
+Scripts to check Project Gutenberg for new texts, then add them to the Archive via the Archive's S3-like interface.
 
