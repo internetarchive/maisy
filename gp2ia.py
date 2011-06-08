@@ -323,7 +323,7 @@ def postSkippedFileToS3 ( archiveItemID, pfile, purl, retrycount, queueDerive, f
 
     dlog( 1, '\tPUT: %s to %s' % (postfilename, path) )
 
-    dlogHead (content_length, headerDictionary)
+    dlogHead (content_length, headerDict)
         
     if dryrun is True:
         dlog( 1, '\tABORT: Dry run' )
@@ -331,7 +331,7 @@ def postSkippedFileToS3 ( archiveItemID, pfile, purl, retrycount, queueDerive, f
         return 0
         
     curllist = ['curl', '--location']
-    for k, v in headerDictionary.iteritems():
+    for k, v in headerDict.iteritems():
         curllist.append( '--header' )
         curllist.append( "%s:%s" % (k.encode('utf-8'), v.encode('utf-8')) )
 #    curllist.append( '--write-out' )
