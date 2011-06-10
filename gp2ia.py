@@ -1,8 +1,12 @@
-#TODO:
-#  extract retry to batch level?
-#  how to handle corrupt RDF error -- should there be a forceDownload?
-# figure out when to queue derive -- problem when files are ERRORing on post
-# note: currently have curl retry set to 5 for posting through S3, can make things slow...
+# TODO:
+#  add tests for us being cut off by PG -- do NOT post HTML rate limiting message as content(!)
+#  move retry logic to post_batch, retry lists should be handled there!
+#  how best to handle corrupt RDF error -- should there be a forceDownload?
+#  figure out better logic to queue derive on retry-- multiple files means multiple derives
+# NOTES:
+#  currently have curl retry set to 5 for posting through S3, can make things slow...
+# CLEANUP:
+#  symbolize retlog status codes instead of duping strings
 
 import io
 import os
@@ -139,6 +143,7 @@ def fetchGutenbergText ( etextID, forceUpload=False, dryrun=True ):
         dlog( 2, "\tURI: %s" % furi ) 
         dlog( 2, '\t\t filesize: %s' % filEl.findtext( nsdcterms( 'extent' ) ) )
         dlog( 2, '\t\t modified: %s' % filEl.findtext( nsdcterms( 'modified' ) ) )
+        crawlDelay()
         httpresp = getHeaders("www.gutenberg.org", furi)
         stat = httpresp.status 
         if stat == 404:
@@ -186,6 +191,7 @@ def fetchGutenbergText ( etextID, forceUpload=False, dryrun=True ):
             if dryrun is True:
                 dlog( 2, '(Skipping actual retrieval, dry run)' )
             else:
+                crawlDelay()
                 curllist = ['curl', '--header','User-Agent:ximm@archive.org (415) 637-5243 :)','--retry','5','-L','--verbose','-o', fullLocalFileName, iurl]
                 p = subprocess.Popen( curllist, stderr = subprocess.STDOUT, stdout = subprocess.PIPE )
                 (res, err) = p.communicate()
@@ -861,19 +867,28 @@ def iso639_2toIso639_3 ( iso2code ):
         return langDict[iso2code]
     else:
         return iso2code
-            
+
+def crawlDelay():
+    """Gutenberg robots.txt asks for Crawl-delay of 10 seconds currenlty..."""
+    cd = 10.5
+    dlog( 2, '\tCRAWL-DELAY: %s seconds' % cd ) ) )
+    time.sleep(cd)
+    return
+
+# Logging   
             
 def dlog ( lev, str ):
     global dlogfile
     global dloglevel
     if lev <= dloglevel and dlogfile is not None:
+        lt = datetime.datetime.now()
         try:
-            dlogfile.write( "%s\n" %  str.encode( 'utf-8' ))
+            dlogfile.write( "%s %s\n" %  ( lt,  str.encode( 'utf-8' ) ) )
         except:
             try:
-                dlogfile.write ( "<* removed unprintable chars *> %s\n" % printable( str ) )
+                dlogfile.write ( "%s <* removed unprintable chars *> %s\n" % (lt, printable( str ) ) )
             except:
-                dlogfile.write( "<* unprintable *>\n" )
+                dlogfile.write( "%s <* unprintable *>\n" % lt )
         # print str
     return
 
@@ -882,7 +897,7 @@ def dlogAppend ( lev, str ):
     global dloglevel
     if lev <= dloglevel and dlogfile is not None:
         try:
-            dlogfile.write( "%s" %  str.encode( 'utf-8' ))
+            dlogfile.write( "%s" %  str.encode( 'utf-8' ) )
         except:
             try:
                 dlogfile.write ( "<* removed unprintable chars *> %s" % printable( str ) )
@@ -1046,13 +1061,19 @@ def main(argv=None):
                                 if res == 0:
                                     if cleanup is True and dryrun is False:
                                         removeItemDir( itemDir )   
+                        elif rtype == "fileGot404":
+                                # TK TODO
+                                # missing code: try again to retrieve and post file X for existing item
+                                # for now, just force the whole item to update: existing files will be skipped
+                                dlog(0, "gp2ia [RETRY %s %s]: (1) couldn't find expected data to post [ %s :: %s ]" % ( retrylogfn, ridx, archiveItemID, retryfile ))
+                                retlog( "%s\t%s\t%s\t%s\t%s" % (rtype, archiveItemID, retryfile, rurl, retrycount) )
                         elif rtype == "missingFile":
                             if rurl == "null":
                                 dlog(0, "gp2ia [RETRY %s %s]: (1) couldn't find expected data to post [ %s :: %s ]" % ( retrylogfn, ridx, archiveItemID, retryfile ))
                                 retlog( "%s\t%s\t%s\t%s\t%s" % (rtype, archiveItemID, retryfile, rurl, retrycount) )
                             else:
                                 # TK TODO
-                                # missing code: retrieve and post file X for existing item Y
+                                # missing code: retrieve and post file X for existing item
                                 # for now, just force the whole item to update: existing files will be skipped
 #                                dlog(0, "gp2ia [RETRY %s %s]: (1) CODE NOT YET WRITTEN TO RETRIEVE AND POST [ %s :: %s ]" % ( retrylogfn, ridx, archiveItemID, retryfile ))                            
 #                                retlog( "%s\t%s\t%s\t%s\t%s" % (rtype, archiveItemID, retryfile, rurl, retrycount) )
