@@ -1,5 +1,7 @@
 # TODO:
 #  add tests for us being cut off by PG -- do NOT post HTML rate limiting message as content(!)
+#   currenly have brittle check of file sizes of retrieved files, and do NOT post if ~ message length.
+#   sample cut off message was a file 47 chars long.
 #  move retry logic to post_batch, retry lists should be handled there!
 #  how best to handle corrupt RDF error -- should there be a forceDownload?
 #  figure out better logic to queue derive on retry-- multiple files means multiple derives
@@ -319,6 +321,11 @@ def postSkippedFileToS3 ( archiveItemID, pfile, purl, retrycount, queueDerive, f
             return 2
     else:
         content_length = os.path.getsize( postfilename )
+        # PG can send us back a 'you're being cut off' message that has length 47, in lieu of requested file!
+        if content_length == 47:
+            dlog( 1, '\tABORT: file to send corrupt: %s' % postfilename )
+            retlog( '%s\t%s\t%s\t%s\t%s' % ( 'corruptFile', archiveItemID, pfile, purl, (retrycount + 1) ) )            
+            return 2            
 
     path = "http://s3.us.archive.org/" + archiveItemID + "/" + pfile
         
@@ -385,7 +392,12 @@ def postFileToS3 ( archiveItemID, dir, pfile, headerDictionary, fidx, fnum, forc
             return False
     else:
         content_length = os.path.getsize( postfilename )
-
+        # PG can send us back a 'you're being cut off' message that has length 47, in lieu of requested file!
+        if content_length == 47:
+            dlog( 1, '\tABORT: file to send corrupt: %s' % postfilename )
+            retlog( '%s\t%s\t%s\t%s\t%s' % ( 'corruptFile', archiveItemID, pfile, purl, (retrycount + 1) ) )            
+            return False            
+        
     path = "http://s3.us.archive.org/" + archiveItemID + "/" + pfile
     
     dlog( 1, '[%s of %s] PUT: %s to %s' % (fidx,fnum, postfilename, path) )
@@ -869,9 +881,10 @@ def iso639_2toIso639_3 ( iso2code ):
         return iso2code
 
 def crawlDelay():
-    """Gutenberg robots.txt asks for Crawl-delay of 10 seconds currenlty..."""
-    cd = 10.5
-    dlog( 2, '\tCRAWL-DELAY: %s seconds' % cd ) ) )
+    """Gutenberg robots.txt asks for Crawl-delay of 10 seconds currently..."""
+    # cd = 10.5 # requested delay
+    cd = 5.25  # let's try this...
+    dlog( 2, '\tCRAWL-DELAY: %s seconds' % cd )
     time.sleep(cd)
     return
 
@@ -1061,10 +1074,14 @@ def main(argv=None):
                                 if res == 0:
                                     if cleanup is True and dryrun is False:
                                         removeItemDir( itemDir )   
-                        elif rtype == "fileGot404":
+                        elif rtype = "corruptRDF":
                                 # TK TODO
-                                # missing code: try again to retrieve and post file X for existing item
-                                # for now, just force the whole item to update: existing files will be skipped
+                                # missing code: need to FORCE REDOWNLOAD of RDF, and ry again to retrieve and post item X
+                                dlog(0, "gp2ia [RETRY %s %s]: (1) couldn't find expected data to post [ %s :: %s ]" % ( retrylogfn, ridx, archiveItemID, retryfile ))
+                                retlog( "%s\t%s\t%s\t%s\t%s" % (rtype, archiveItemID, retryfile, rurl, retrycount) )
+                        elif rtype == "fileGot404" or rtype = "corruptFile":
+                                # TK TODO
+                                # missing code: need to FORCE REDOWNLOAD try again to retrieve and post file X for existing item
                                 dlog(0, "gp2ia [RETRY %s %s]: (1) couldn't find expected data to post [ %s :: %s ]" % ( retrylogfn, ridx, archiveItemID, retryfile ))
                                 retlog( "%s\t%s\t%s\t%s\t%s" % (rtype, archiveItemID, retryfile, rurl, retrycount) )
                         elif rtype == "missingFile":

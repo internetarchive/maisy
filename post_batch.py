@@ -1,5 +1,6 @@
 import sys
 import io
+import time
 import datetime
 import gp2ia
 
@@ -35,30 +36,33 @@ def main():
     
     with open( postlog, "a" ) as logfile:
         lt = datetime.datetime.now()
-        blog ( 'Starting batch for %s at %s' % ( postlist, lt ) )
+        blog ( '%s Starting batch for %s at %s' % ( lt, postlist, lt ) )
         for aline in targfile:
             anID = aline.strip()
             istr =  str(itemcount).zfill(4)
-            blog ('[%s] Posting %s...' % (istr, anID) )
+            lt = datetime.datetime.now()
+            blog ('%s [%s] Posting %s...' % (lt, istr, anID) )
             postargs = args[:]
             postargs.insert(0, anID)
             res = gp2ia.main(postargs)
             itemcount = itemcount + 1
+            lt = datetime.datetime.now()
             if res == 0:
                 goodcount = goodcount + 1
-                blog( '\t(0) Success!')
+                blog( '%s \t(0) Success!' % lt)
             elif res == 1:
                 retcode = 1
-                blog( '\t(1) Failed: post error(s)' )
+                blog( '%s \t(1) Failed: post error(s)' % lt)
             elif res == 2:
                 retcode = 1
-                blog( '\t(2) Failed: missing data' )
+                blog( '%s \t(2) Failed: missing data' % lt)
             else:
                 retcode = 1
-                blog( '\t(?) Unknown exit status ( %s ) % res' )
+                blog( '%s \t(%s) Unknown exit status' % (lt, res ) )
+            # time.sleep(5)
         lt = datetime.datetime.now()
-        blog ( 'Posted %s of %s items successfully' % ( goodcount, itemcount) )
-        blog ( 'Finished batch for %s at %s' % ( postlist, lt ) )
+        blog ( '%s Posted %s of %s items successfully' % ( lt, goodcount, itemcount) )
+        blog ( '%s Finished batch for %s at %s' % ( lt, postlist, lt ) )
 
     targfile.close()
     return retcode
