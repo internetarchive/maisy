@@ -9,6 +9,11 @@
 #  currently have curl retry set to 5 for posting through S3, can make things slow...
 # CLEANUP:
 #  symbolize retlog status codes instead of duping strings
+#  freezing after posting a file successfully...? very odd
+#   --> debug at line 243, test if we ever return from res = post...
+#   --> we see the (0) Success! in the log, should simply return at that pt
+# DEBUGGING:
+#   nothing amiss
 
 import io
 import os
@@ -240,6 +245,7 @@ def postGutenbergTextToS3 ( postTuple, forceUpload, dryrun, testcollection):
     if fnum > 0:
         firstFileName = filesToPost.pop(0)    
         res = postFileToS3 ( archiveItemID, itemDir, firstFileName, headerDict, fidx, fnum, forceUpload, dryrun, testcollection)
+        dlog( 3, '*** DEBUG *** Returned from postFileToS3 with result %s, dryrun= %s' % ( res, dryrun ) )
         if res is True:
             pnum = pnum + 1
         else:
@@ -364,10 +370,10 @@ def postSkippedFileToS3 ( archiveItemID, pfile, purl, retrycount, queueDerive, f
     exitcode = p.wait()
         
     if exitcode == 0:
-        dlog( 1, '\tSuccess!' ) 
+        dlog( 1, '\t(0) Success!' ) 
         return 0
     else:
-        dlog( 1, '\tFailed! (Exit code %s)' % exitcode)
+        dlog( 1, '\t(%s) Failed!' % exitcode)
         dlog( 1, '\tError: %s' % err)
         dlog( 1, '\tResponse:\n %s' % res)
         dlog( 1, repr(curllist) )
@@ -436,10 +442,13 @@ def postFileToS3 ( archiveItemID, dir, pfile, headerDictionary, fidx, fnum, forc
     exitcode = p.wait()
         
     if exitcode == 0:
-        dlog( 1, '\tSuccess!' ) 
+        dlog( 1, '\t(0) Success!' )
+        dlog( 3, '\tPossible error: %s' % err)
+        dlog( 3, '\tResponse:\n %s' % res)
+        dlog( 3, repr(curllist) )
         return True
     elif exitcode == 52:
-        dlog( 1, '\tEmpty reply from server!?' )
+        dlog( 1, '\t(52) Empty reply from server!?' )
         time.sleep(5)
         if archiveHasCurrentFile( archiveItemID, pfile, content_length) is False:
             dlog( 1, '\tPossible error: %s' % err)
@@ -449,7 +458,7 @@ def postFileToS3 ( archiveItemID, dir, pfile, headerDictionary, fidx, fnum, forc
             retlog( '%s\t%s\t%s\t%s\t%s' % ( 'retryFileEmptyResponse', archiveItemID, pfile, "local", '1') )
             return False
         else:
-            dlog( 1, '\t*** BAD SERVER RESPONSE (Exit code %s) but file posted OK.' % exitcode)
+            dlog( 1, '\t(52) *** BAD SERVER RESPONSE (Exit code %s) but file posted OK.' % exitcode)
             dlog( 1, '\tError: %s' % err)
             dlog( 1, '\tResponse:\n %s' % res)
             dlog( 1, repr(curllist) )
@@ -457,7 +466,7 @@ def postFileToS3 ( archiveItemID, dir, pfile, headerDictionary, fidx, fnum, forc
     else:
         time.sleep(2)
         if archiveHasCurrentFile( archiveItemID, pfile, content_length) is False:
-            dlog( 1, '\tFailed! (Exit code %s)' % exitcode)
+            dlog( 1, '\t(%s) Failed!' % exitcode)
             dlog( 1, '\tError: %s' % err)
             dlog( 1, '\tResponse:\n %s' % res)
             dlog( 1, repr(curllist) )
@@ -465,7 +474,7 @@ def postFileToS3 ( archiveItemID, dir, pfile, headerDictionary, fidx, fnum, forc
             retlog( '%s\t%s\t%s\t%s\t%s' % ( 'retryFile', archiveItemID, pfile, "local", '1') )
             return False
         else:
-            dlog( 1, '\t*** BAD SERVER RESPONSE (Exit code %s) but file posted OK.' % exitcode)
+            dlog( 1, '\t(%s) *** BAD SERVER RESPONSE but file posted OK.' % exitcode)
             dlog( 1, '\tError: %s' % err)
             dlog( 1, '\tResponse:\n %s' % res)
             dlog( 1, repr(curllist) )
@@ -524,10 +533,11 @@ def archiveHasCurrentFile ( archiveID, fname, fsize ):
 # original formulation courtesy Mike McCabe
 def s3_path_exists( path ):
     try:
+        dlog( 2, '*** DEBUG *** About to try to HEAD on %s' % ( path ) )
         conn = httplib.HTTPConnection( path )
         conn.request('HEAD', '/')
         res = conn.getresponse() 
-        # dlog( 3, 'HTTP HEAD response: %s' % res.status)
+        dlog( 2, '*** DEBUG *** \t HTTP HEAD response: %s' % res.status)
         redirectResponses = [301, 302, 307]
         goodResponses = [200, 500]
         if res.status in redirectResponses:
@@ -541,13 +551,16 @@ def s3_path_exists( path ):
             conn = httplib.HTTPConnection(host, port=port)
             # TK TODO need to use GET here as HEAD is failing after the redirect with a 500 Server Error
             # there appears to be different code version running on the iaxxxxx machines that the redirect points to
+            dlog( 2, '*** DEBUG *** \t Attempting GET instead at : %s:%s' % (host, port) )        
             conn.request('GET', '/')
             res = conn.getresponse()
+            dlog( 2, '*** DEBUG *** \t HTTP GET response: %s' % res.status)
         if res.status in goodResponses:
             return True
         else:
             return False
     except httplib.BadStatusLine, e:
+        dlog( 2, '*** DEBUG *** EXCEPTION!' % res.status)
         etime = datetime.datetime.now()
         dlog( 2, 'ERROR: exists-check BadStatusLine %s %s %s' % (e, path, etime) )
     return False
@@ -909,13 +922,14 @@ def dlogAppend ( lev, str ):
     global dlogfile
     global dloglevel
     if lev <= dloglevel and dlogfile is not None:
+        lt = datetime.datetime.now()
         try:
-            dlogfile.write( "%s" %  str.encode( 'utf-8' ) )
+            dlogfile.write( "%s %s" %  ( lt,  str.encode( 'utf-8' ) ) )
         except:
             try:
-                dlogfile.write ( "<* removed unprintable chars *> %s" % printable( str ) )
+                dlogfile.write ( "%s <* removed unprintable chars *> %s" % (lt, printable( str ) ) )
             except:
-                dlogfile.write( "<* unprintable *>\n" )
+                dlogfile.write( "%s <* unprintable *>\n" % lt )
         # print str
     return
 
@@ -969,7 +983,8 @@ def main(argv=None):
         
     forceUpload = False
     dryrun = False
-    verbose = False    
+    verbose = False
+    debug = False
     retry = False
     testcollection = True
     cleanup = False
@@ -984,6 +999,8 @@ def main(argv=None):
             qual = anArg[1:len(anArg)]
             if qual == "dry":
                 dryrun = True
+            elif qual == "debug":
+                debug = True
             elif qual == "verbose":
                 verbose = True
             elif qual == "force":
@@ -1024,7 +1041,10 @@ def main(argv=None):
         dloglevel = 2
     else:
         dloglevel = 1
-        
+    
+    if debug is True:
+        dlogLevel = 3
+    
     with codecs.open( dlfn, encoding='utf-8', mode=logmode ) as dlogfile:
         with codecs.open( rlfn, encoding='utf-8', mode=logmode ) as retlogfile:
             if retry is True:
@@ -1074,12 +1094,12 @@ def main(argv=None):
                                 if res == 0:
                                     if cleanup is True and dryrun is False:
                                         removeItemDir( itemDir )   
-                        elif rtype = "corruptRDF":
+                        elif rtype == "corruptRDF":
                                 # TK TODO
                                 # missing code: need to FORCE REDOWNLOAD of RDF, and ry again to retrieve and post item X
                                 dlog(0, "gp2ia [RETRY %s %s]: (1) couldn't find expected data to post [ %s :: %s ]" % ( retrylogfn, ridx, archiveItemID, retryfile ))
                                 retlog( "%s\t%s\t%s\t%s\t%s" % (rtype, archiveItemID, retryfile, rurl, retrycount) )
-                        elif rtype == "fileGot404" or rtype = "corruptFile":
+                        elif rtype == "fileGot404" or rtype == "corruptFile":
                                 # TK TODO
                                 # missing code: need to FORCE REDOWNLOAD try again to retrieve and post file X for existing item
                                 dlog(0, "gp2ia [RETRY %s %s]: (1) couldn't find expected data to post [ %s :: %s ]" % ( retrylogfn, ridx, archiveItemID, retryfile ))
