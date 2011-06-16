@@ -8,6 +8,7 @@
 # NOTES:
 #  currently have curl retry set to 5 for posting through S3, can make things slow...
 # CLEANUP:
+#  hard-coded timeout for bucket creation (timeout = 900s) in post
 #  symbolize retlog status codes instead of duping strings
 #  freezing after posting a file successfully...? very odd
 #   --> debug at line 243, test if we ever return from res = post...
@@ -269,8 +270,14 @@ def postGutenbergTextToS3 ( postTuple, forceUpload, dryrun, testcollection):
     if not dryrun:
         dlogAppend( 1, 'Verifying bucket exists' )
         timeToCreate = 0
+        timeout = 900 # 15 minutes
         bucketExists = s3_path_exists( bucketPath ) 
         while bucketExists is False:
+            if timeToCreate > timeout:
+                dlog( 1, 'FAILURE: IAS3 did not create bucket ( %s ) with seed file ( %s) in %s seconds' % ( archiveItemID, firstFileName, timeout ) )
+                dlog( 1, '\n*** NEED TO RETRY ITEM: %s\n' % (archiveItemID) ) # make sure formatted for easy grepping
+                retlog( '%s\t%s\t%s%s\t%s' % ( 'retryItem', archiveItemID, firstFileName, 'local', '1') )
+                return 1
             bucketExists = s3_path_exists( bucketPath ) 
             timeToCreate = timeToCreate + 5
             dlogAppend( 2, '.' )
@@ -506,9 +513,13 @@ def archiveID_exists ( archiveID ):
 def archiveID_files ( archiveID ):
     """Return as a list of lxlml elements all files that currently exists for a given Archive ID."""
     dlog( 3, 'Checking for files for %s' % archiveID )
-    itemInfoPath = "http://www.archive.org/services/find_file.php?file=" + archiveID
+    itemInfoPath = "http://www.archive.org/services/find_file.php?file=%s" % archiveID
 #    searchPath = "http://www.archive.org/advancedsearch.php?q=identifier%3A" + archiveID + "&fl%5B%5D=identifier&output=xml"
-    rt = etree.parse ( itemInfoPath ) 
+    try:
+        rt = etree.parse ( itemInfoPath ) 
+    except:
+        dlog( 1, 'ERROR: archiveID_Files failed for %s, bad or no data returned?' % archiveID )
+        rt = []
     if rt is not None:
         flist = rt.find ('files')
         if flist is not None:
@@ -914,8 +925,9 @@ def dlog ( lev, str ):
             try:
                 dlogfile.write ( "%s <* removed unprintable chars *> %s\n" % (lt, printable( str ) ) )
             except:
-                dlogfile.write( "%s <* unprintable *>\n" % lt )
+                dlogfile.write ( "%s <* unprintable *>\n" % lt )
         # print str
+        dlogfile.flush()
     return
 
 def dlogAppend ( lev, str ):
@@ -929,8 +941,9 @@ def dlogAppend ( lev, str ):
             try:
                 dlogfile.write ( "%s <* removed unprintable chars *> %s" % (lt, printable( str ) ) )
             except:
-                dlogfile.write( "%s <* unprintable *>\n" % lt )
+                dlogfile.write ( "%s <* unprintable *>\n" % lt )
         # print str
+        dlogfile.flush()
     return
 
 def dlogHead (siz, aDict):
@@ -938,6 +951,8 @@ def dlogHead (siz, aDict):
     dlog( 2, '\tcontent-length = %s' % siz )
     for k,v in aDict.iteritems():    
         dlog( 2, '\t%s = %s' % (k,v) )
+    dlogfile.flush()
+
 
 def retlog ( str ):
     global retlogfile
@@ -947,8 +962,9 @@ def retlog ( str ):
         try:
             retlogfile.write ( "<* removed unprintable chars *> %s\n" % printable( str ) )
         except:
-            retlogfile.write( "<* unprintable *>\n" )
+            retlogfile.write ( "<* unprintable *>\n" )
     # print str
+    retlogfile.flush()    
     return
 
 
