@@ -1,4 +1,6 @@
+# see line 294: per Hank's request currently never derive
 # TODO:
+#  collapse dlogAppend into arg of dlog; abstract class for reuse.
 #  add tests for us being cut off by PG -- do NOT post HTML rate limiting message as content(!)
 #   currenly have brittle check of file sizes of retrieved files, and do NOT post if ~ message length.
 #   sample cut off message was a file 47 chars long.
@@ -115,12 +117,19 @@ def fetchGutenbergText ( etextID, forceUpload=False, dryrun=True ):
         return None
 
     ebookTitle = ebookEntry.findtext ( nsdcterms( 'title' ) )
-    ebookTitle = sanitizeString ( ebookTitle )
     if ebookTitle is None:
         dlog( 2, 'ABORT. No title found for item!' )
         dlogAppend( 2, '\n' )
-        printDict (hd)
-        return
+        # dlogHead (0, hd)
+        return None
+    
+    ebookTitle = sanitizeString ( ebookTitle )
+    # check again post-sanitization :P
+    if ebookTitle is None:
+        dlog( 2, 'ABORT. No title found for item!' )
+        dlogAppend( 2, '\n' )
+        # dlogHead (0, hd)
+        return None
         
     archiveItemID = generateItemID (ebookTitle, etextID)
     
@@ -135,7 +144,7 @@ def fetchGutenbergText ( etextID, forceUpload=False, dryrun=True ):
                 kdx = kdx + 1
                 if kdx > 100:
                     dlog( 2, 'ABORT: Could not find a free archive ID!? Base:',generateItemID (ebookTitle, etextID) )
-                    return
+                    return None
        
  #   ebookFormats = ebookEntry.findall ( nsdcterms ( 'hasFormat' ) )
     ebookFormats = et.findall ( nspgterms ( 'file' ) )
@@ -291,7 +300,7 @@ def postGutenbergTextToS3 ( postTuple, forceUpload, dryrun, testcollection):
     
     dlog( 1, '\nPutting remaining %s files...' % (len(filesToPost)) )
     for aSecondaryFile in filesToPost:
-        if fidx == fnum:
+        if fidx == fnum and False:
             # last file
             headerDict['x-archive-queue-derive'] = '1' 
         res = postFileToS3 ( archiveItemID, itemDir, aSecondaryFile, headerDict, fidx, fnum, forceUpload, dryrun, testcollection)
@@ -544,11 +553,11 @@ def archiveHasCurrentFile ( archiveID, fname, fsize ):
 # original formulation courtesy Mike McCabe
 def s3_path_exists( path ):
     try:
-        dlog( 2, '*** DEBUG *** About to try to HEAD on %s' % ( path ) )
+        dlog( 3, '*** DEBUG *** About to try to HEAD on %s' % ( path ) )
         conn = httplib.HTTPConnection( path )
         conn.request('HEAD', '/')
         res = conn.getresponse() 
-        dlog( 2, '*** DEBUG *** \t HTTP HEAD response: %s' % res.status)
+        dlog( 3, '*** DEBUG *** \t HTTP HEAD response: %s' % res.status)
         redirectResponses = [301, 302, 307]
         goodResponses = [200, 500]
         if res.status in redirectResponses:
@@ -562,16 +571,16 @@ def s3_path_exists( path ):
             conn = httplib.HTTPConnection(host, port=port)
             # TK TODO need to use GET here as HEAD is failing after the redirect with a 500 Server Error
             # there appears to be different code version running on the iaxxxxx machines that the redirect points to
-            dlog( 2, '*** DEBUG *** \t Attempting GET instead at : %s:%s' % (host, port) )        
+            dlog( 3, '*** DEBUG *** \t Attempting GET instead at : %s:%s' % (host, port) )        
             conn.request('GET', '/')
             res = conn.getresponse()
-            dlog( 2, '*** DEBUG *** \t HTTP GET response: %s' % res.status)
+            dlog( 3, '*** DEBUG *** \t HTTP GET response: %s' % res.status)
         if res.status in goodResponses:
             return True
         else:
             return False
     except httplib.BadStatusLine, e:
-        dlog( 2, '*** DEBUG *** EXCEPTION!' % res.status)
+        dlog( 3, '*** DEBUG *** EXCEPTION!' % res.status)
         etime = datetime.datetime.now()
         dlog( 2, 'ERROR: exists-check BadStatusLine %s %s %s' % (e, path, etime) )
     return False
@@ -936,7 +945,7 @@ def dlogAppend ( lev, str ):
     if lev <= dloglevel and dlogfile is not None:
         lt = datetime.datetime.now()
         try:
-            dlogfile.write( "%s %s" %  ( lt,  str.encode( 'utf-8' ) ) )
+            dlogfile.write( "%s" %  ( str.encode( 'utf-8' ) ) )
         except:
             try:
                 dlogfile.write ( "%s <* removed unprintable chars *> %s" % (lt, printable( str ) ) )

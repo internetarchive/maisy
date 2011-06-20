@@ -8,6 +8,7 @@ def blog ( str ):
     global logfile
     print str
     logfile.write( "%s\n" %  str.encode( 'utf-8' ))
+    logfile.flush()
 
 global logfile
 
