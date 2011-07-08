@@ -1,4 +1,3 @@
-# see line 294: per Hank's request currently never derive
 # TODO:
 #  collapse dlogAppend into arg of dlog; abstract class for reuse.
 #  add tests for us being cut off by PG -- do NOT post HTML rate limiting message as content(!)
@@ -161,44 +160,52 @@ def fetchGutenbergText ( etextID, forceUpload=False, dryrun=True ):
         dlog( 2, '\t\t filesize: %s' % filEl.findtext( nsdcterms( 'extent' ) ) )
         dlog( 2, '\t\t modified: %s' % filEl.findtext( nsdcterms( 'modified' ) ) )
         crawlDelay()
-        httpresp = getHeaders("www.gutenberg.org", furi)
-        stat = httpresp.status 
-        if stat == 404:
+        try:
+            httpresp = getHeaders("www.gutenberg.org", furi)
+        except:
+            httpresp = None
+        if httpresp is None:
              dlog( 2, '\t\t***'  )
-             dlog( 2, '\t\t*** WARNING: 404 returned for %s' % furi )
+             dlog( 2, '\t\t*** WARNING: network failure for %s' % furi )
              dlog( 2, '\t\t***' )
-             retlog( '%s\t%s\t%s\t%s\t%s' % ( 'fileGot404', archiveItemID, localFileName, furi, '1') )      
-        loc = httpresp.getheader( 'location' )
-        cd = httpresp.getheader( 'content-disposition' )
-        ct =  httpresp.getheader( 'content-type' )
-        foundname = False
-        if loc is not None:
-            localFileName = loc.split("/")[-1]
-            dlog( 2, '\t\tEXTRACTED from location: "%s"' % localFileName )
-            foundname = True            
-        if not foundname and cd is not None:            
-            #dlog( 2, cd )
-            ftag = "filename="
-            l = cd.rpartition(ftag)
-            if ftag in l:
-                localFileName = l[l.index(ftag)+1] # pull element in list to right of ftag, presumably the filename
-                dlog( 2, '\t\tEXTRACTED from content-disposition: "%s"' % localFileName )
-                foundname = True                
-        if not foundname and ct is not None:
-            if ct in  ( 'image/jpeg', 'image/jpg'):
-                localFileName = localFileName + ".jpg"
-                dlog( 2, '\t\tMODIFIED based on content-type: "%s"' % localFileName )
-            elif ct in  ( 'image/jpeg2000', 'image/jp2'):
-                localFileName = localFileName + ".jp2"
-                dlog( 2, '\t\tMODIFIED based on content-type: "%s"' % localFileName )
-
-        ext = localFileName.rpartition(".")[-1]
-        if ext in ( "html", "htm", "rst"):
-            dlog( 2, '\t\t**'  )
-            dlog( 2, '\t\t** EXCLUDING type with subdirectories: %s' % localFileName )
-            dlog( 2, '\t\t**' )
-        elif stat != 404:
-            locnames[furi] = localFileName   
+             retlog( '%s\t%s\t%s\t%s\t%s' % ( 'missingFile', archiveItemID, localFileName, furi, '1') )      
+        else:
+            stat = httpresp.status 
+            if stat == 404:
+                 dlog( 2, '\t\t***'  )
+                 dlog( 2, '\t\t*** WARNING: 404 returned for %s' % furi )
+                 dlog( 2, '\t\t***' )
+                 retlog( '%s\t%s\t%s\t%s\t%s' % ( 'fileGot404', archiveItemID, localFileName, furi, '1') )      
+            loc = httpresp.getheader( 'location' )
+            cd = httpresp.getheader( 'content-disposition' )
+            ct =  httpresp.getheader( 'content-type' )
+            foundname = False
+            if loc is not None:
+                localFileName = loc.split("/")[-1]
+                dlog( 2, '\t\tEXTRACTED from location: "%s"' % localFileName )
+                foundname = True            
+            if not foundname and cd is not None:            
+                #dlog( 2, cd )
+                ftag = "filename="
+                l = cd.rpartition(ftag)
+                if ftag in l:
+                    localFileName = l[l.index(ftag)+1] # pull element in list to right of ftag, presumably the filename
+                    dlog( 2, '\t\tEXTRACTED from content-disposition: "%s"' % localFileName )
+                    foundname = True                
+            if not foundname and ct is not None:
+                if ct in  ( 'image/jpeg', 'image/jpg'):
+                    localFileName = localFileName + ".jpg"
+                    dlog( 2, '\t\tMODIFIED based on content-type: "%s"' % localFileName )
+                elif ct in  ( 'image/jpeg2000', 'image/jp2'):
+                    localFileName = localFileName + ".jp2"
+                    dlog( 2, '\t\tMODIFIED based on content-type: "%s"' % localFileName )
+            ext = localFileName.rpartition(".")[-1]
+            if ext in ( "html", "htm", "rst"):
+                dlog( 2, '\t\t**'  )
+                dlog( 2, '\t\t** EXCLUDING type with subdirectories: %s' % localFileName )
+                dlog( 2, '\t\t**' )
+            elif stat != 404:
+                locnames[furi] = localFileName   
         
     dlog( 2, 'Retrieving files not in %s...' % itemDir )
     for iurl,localFileName in locnames.iteritems():
@@ -280,14 +287,20 @@ def postGutenbergTextToS3 ( postTuple, forceUpload, dryrun, testcollection):
         dlogAppend( 1, 'Verifying bucket exists' )
         timeToCreate = 0
         timeout = 900 # 15 minutes
-        bucketExists = s3_path_exists( bucketPath ) 
+        try:
+            bucketExists = s3_path_exists( bucketPath )
+        except:
+            bucketExists = False
         while bucketExists is False:
             if timeToCreate > timeout:
                 dlog( 1, 'FAILURE: IAS3 did not create bucket ( %s ) with seed file ( %s) in %s seconds' % ( archiveItemID, firstFileName, timeout ) )
                 dlog( 1, '\n*** NEED TO RETRY ITEM: %s\n' % (archiveItemID) ) # make sure formatted for easy grepping
                 retlog( '%s\t%s\t%s%s\t%s' % ( 'retryItem', archiveItemID, firstFileName, 'local', '1') )
                 return 1
-            bucketExists = s3_path_exists( bucketPath ) 
+            try:
+                bucketExists = s3_path_exists( bucketPath )
+            except:
+                bucketExists = False
             timeToCreate = timeToCreate + 5
             dlogAppend( 2, '.' )
             time.sleep(5)
@@ -416,8 +429,8 @@ def postFileToS3 ( archiveItemID, dir, pfile, headerDictionary, fidx, fnum, forc
         content_length = os.path.getsize( postfilename )
         # PG can send us back a 'you're being cut off' message that has length 47, in lieu of requested file!
         if content_length == 47:
-            dlog( 1, '\tABORT: file to send corrupt: %s' % postfilename )
-            retlog( '%s\t%s\t%s\t%s\t%s' % ( 'corruptFile', archiveItemID, pfile, purl, (retrycount + 1) ) )            
+            dlog( 1, '\tABORT: file to send corrupt: %s ( USUALLY: SLOW DOWN message )' % postfilename )
+            retlog( '%s\t%s\t%s\t%s\t%s' % ( 'corruptFile', archiveItemID, pfile, 'null', '1' ) )            
             return False            
         
     path = "http://s3.us.archive.org/" + archiveItemID + "/" + pfile
@@ -453,9 +466,14 @@ def postFileToS3 ( archiveItemID, dir, pfile, headerDictionary, fidx, fnum, forc
     # curlcmd = ' '.join([str(v) for v in curllist])
 
     # post the file using curl, use of --write-out returns the HTTP response code
-    p = subprocess.Popen( curllist, stderr = subprocess.STDOUT, stdout = subprocess.PIPE )
-    (res, err) = p.communicate()
-    exitcode = p.wait()
+    try:
+        p = subprocess.Popen( curllist, stderr = subprocess.STDOUT, stdout = subprocess.PIPE )
+        (res, err) = p.communicate()
+        exitcode = p.wait()
+    except:
+        dlog( 1, '\n*** NEED TO RETRY FILE (Empty Response): %s %s\n' % (archiveItemID, pfile) ) # make sure formatted for easy grepping
+        retlog( '%s\t%s\t%s\t%s\t%s' % ( 'retryFileEmptyResponse', archiveItemID, pfile, "local", '1') )
+        return False
         
     if exitcode == 0:
         dlog( 1, '\t(0) Success!' )
@@ -500,7 +518,11 @@ def postFileToS3 ( archiveItemID, dir, pfile, headerDictionary, fidx, fnum, forc
 def archiveItem_exists ( gutenbergID ):
     """Check whether there is an Archive item already for a given Gutenberg eText. Fails if item exists but is non-searchable!"""
     searchPath = "http://www.archive.org/advancedsearch.php?q=call_number%3Agutenberg%3Fetext%23%3F" + gutenbergID + "&fl%5B%5D=call_number&output=xml"
-    rt = etree.parse ( searchPath ) 
+    try:
+        rt = etree.parse ( searchPath ) 
+    except:
+        dlog( 1, 'ERROR: archiveItem_exists failed for %s, bad or no data returned?' % gutenbergID )
+        return False
     if rt is not None:
         resultEl = rt.find ('result')
         if resultEl.get('numFound') != '0':
@@ -511,8 +533,11 @@ def archiveItem_exists ( gutenbergID ):
 def archiveID_exists ( archiveID ):
     """Check whether there is an Archive item already for a given Archive ID."""
     itemInfoPath = "http://www.archive.org/services/find_file.php?file=" + archiveID
-#    searchPath = "http://www.archive.org/advancedsearch.php?q=identifier%3A" + archiveID + "&fl%5B%5D=identifier&output=xml"
-    rt = etree.parse ( itemInfoPath ) 
+    try:
+        rt = etree.parse ( itemInfoPath ) 
+    except:
+        dlog( 1, 'ERROR: archiveID_exists failed for %s, bad or no data returned?' % archiveID )
+        return True 
     if rt is not None:
         mel = rt.find ('metadata')
         if mel is not None:
@@ -530,7 +555,11 @@ def archiveID_files ( archiveID ):
         dlog( 1, 'ERROR: archiveID_Files failed for %s, bad or no data returned?' % archiveID )
         rt = []
     if rt is not None:
-        flist = rt.find ('files')
+        # hack too lazy to look up safe alternative I think .get
+        try:
+            flist = rt.find ('files')
+        except:
+            flist = None
         if flist is not None:
             dlog( 4, '\t%s' %flist.findall('file') )
             return flist.findall('file')
@@ -916,7 +945,9 @@ def iso639_2toIso639_3 ( iso2code ):
 def crawlDelay():
     """Gutenberg robots.txt asks for Crawl-delay of 10 seconds currently..."""
     # cd = 10.5 # requested delay
-    cd = 5.25  # let's try this...
+#    cd = 5.25  # let's try this...
+    cd = 3.25  # let's try this...
+#    cd = 2.25  # let's try this...
     dlog( 2, '\tCRAWL-DELAY: %s seconds' % cd )
     time.sleep(cd)
     return
@@ -1011,7 +1042,7 @@ def main(argv=None):
     verbose = False
     debug = False
     retry = False
-    testcollection = True
+    testcollection = False
     cleanup = False
     
     logdir = "./gplogs/"
